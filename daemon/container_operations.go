@@ -702,13 +702,20 @@ func (daemon *Daemon) getNetworkedContainer(containerID, connectedContainerID st
 }
 
 func (daemon *Daemon) releaseNetwork(container *container.Container) {
+	container.Lock()
+	// We opt not to defer so as to better control the timing of the Unlock & move the "sb.Delete"
+	// operation out of the critical section.
+	// defer container.Unlock()
 	if container.HostConfig.NetworkMode.IsContainer() || container.Config.NetworkDisabled {
+		container.Unlock()
 		return
 	}
 
+	cid := container.ID
 	sid := container.NetworkSettings.SandboxID
 	settings := container.NetworkSettings.Networks
 	container.NetworkSettings.Ports = nil
+	container.Unlock()
 
 	if sid == "" || len(settings) == 0 {
 		return
@@ -729,11 +736,11 @@ func (daemon *Daemon) releaseNetwork(container *container.Container) {
 	}
 
 	if err := sb.Delete(); err != nil {
-		logrus.Errorf("Error deleting sandbox id %s for container %s: %v", sid, container.ID, err)
+		logrus.Errorf("Error deleting sandbox id %s for container %s: %v", sid, cid, err)
 	}
 
 	attributes := map[string]string{
-		"container": container.ID,
+		"container": cid,
 	}
 	for _, nw := range networks {
 		daemon.LogNetworkEventWithAttributes(nw, "disconnect", attributes)

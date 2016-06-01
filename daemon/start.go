@@ -88,6 +88,22 @@ func (daemon *Daemon) Start(container *container.Container) error {
 // between containers. The container is left waiting for a signal to
 // begin running.
 func (daemon *Daemon) containerStart(container *container.Container) (err error) {
+	// if we encounter an error during start we need to ensure that any other
+	// setup has been cleaned up properly
+	defer func() {
+		if err != nil {
+			container.Lock()
+			container.SetError(err)
+			// if no one else has set it, make sure we don't leave it at zero
+			if container.ExitCode == 0 {
+				container.ExitCode = 128
+			}
+			container.ToDisk()
+			container.Unlock()
+			daemon.Cleanup(container)
+		}
+	}()
+
 	container.Lock()
 	defer container.Unlock()
 
@@ -98,20 +114,6 @@ func (daemon *Daemon) containerStart(container *container.Container) (err error)
 	if container.RemovalInProgress || container.Dead {
 		return fmt.Errorf("Container is marked for removal and cannot be started.")
 	}
-
-	// if we encounter an error during start we need to ensure that any other
-	// setup has been cleaned up properly
-	defer func() {
-		if err != nil {
-			container.SetError(err)
-			// if no one else has set it, make sure we don't leave it at zero
-			if container.ExitCode == 0 {
-				container.ExitCode = 128
-			}
-			container.ToDisk()
-			daemon.Cleanup(container)
-		}
-	}()
 
 	if err := daemon.conditionalMountOnStart(container); err != nil {
 		return err
@@ -159,6 +161,9 @@ func (daemon *Daemon) containerStart(container *container.Container) (err error)
 func (daemon *Daemon) Cleanup(container *container.Container) {
 	daemon.releaseNetwork(container)
 
+	// TODO: Which of these other cleanup operations can block indefinitely?
+	container.Lock()
+	defer container.Unlock()
 	container.UnmountIpcMounts(detachMounted)
 
 	if err := daemon.conditionalUnmountOnCleanup(container); err != nil {

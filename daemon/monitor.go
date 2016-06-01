@@ -27,15 +27,18 @@ func (daemon *Daemon) StateChanged(id string, e libcontainerd.StateInfo) error {
 		}
 		daemon.LogContainerEvent(c, "oom")
 	case libcontainerd.StateExit:
-		c.Lock()
-		defer c.Unlock()
-		c.Wait()
-		c.Reset(false)
-		c.SetStopped(platformConstructExitStatus(e))
-		attributes := map[string]string{
-			"exitCode": strconv.Itoa(int(e.ExitCode)),
-		}
-		daemon.LogContainerEventWithAttributes(c, "die", attributes)
+		// Move "cleanup" out of the container lock's critical section
+		func() {
+			c.Lock()
+			defer c.Unlock()
+			c.Wait()
+			c.Reset(false)
+			c.SetStopped(platformConstructExitStatus(e))
+			attributes := map[string]string{
+				"exitCode": strconv.Itoa(int(e.ExitCode)),
+			}
+			daemon.LogContainerEventWithAttributes(c, "die", attributes)
+		}()
 		daemon.Cleanup(c)
 		// FIXME: here is race condition between two RUN instructions in Dockerfile
 		// because they share same runconfig and change image. Must be fixed
