@@ -706,9 +706,11 @@ func (daemon *Daemon) releaseNetwork(container *container.Container) {
 		return
 	}
 
+	container.DataLock.Lock()
 	sid := container.NetworkSettings.SandboxID
 	settings := container.NetworkSettings.Networks
 	container.NetworkSettings.Ports = nil
+	container.DataLock.Unlock()
 
 	if sid == "" || len(settings) == 0 {
 		return
